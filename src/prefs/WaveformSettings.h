@@ -46,6 +46,7 @@ public:
    void LoadPrefs();
    void SavePrefs();
    void Update();
+   void LoadDBRange();
 
    void ConvertToEnumeratedDBRange();
    void ConvertToActualDBRange();

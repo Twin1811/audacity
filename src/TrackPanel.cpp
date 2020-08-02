@@ -82,6 +82,8 @@ is time to refresh some aspect of the screen.
 #include "tracks/ui/TrackView.h"
 #include "tracks/ui/TrackVRulerControls.h"
 
+#include "prefs/WaveformSettings.h"
+
 //This loads the appropriate set of cursors, depending on platform.
 #include "../images/Cursors.h"
 
@@ -90,6 +92,7 @@ is time to refresh some aspect of the screen.
 #include <wx/dc.h>
 #include <wx/dcclient.h>
 #include <wx/graphics.h>
+
 
 /**
 
@@ -331,7 +334,10 @@ TrackPanel::~TrackPanel()
 }
 
 void TrackPanel::UpdatePrefs()
-{
+{  
+       
+   UpdateWaveformSettings();
+
    // All vertical rulers must be recalculated since the minimum and maximum
    // frequences may have been changed.
    UpdateVRulers();
@@ -859,6 +865,15 @@ void TrackPanel::SetBackgroundCell
 std::shared_ptr< TrackPanelCell > TrackPanel::GetBackgroundCell()
 {
    return mpBackground;
+}
+
+void TrackPanel::UpdateWaveformSettings()
+{
+   const auto &tracks = GetTracks();
+   for (auto waveTrack : tracks->Any<WaveTrack>()) {
+      WaveformSettings &settings = waveTrack->GetIndependentWaveformSettings();
+      settings.LoadDBRange();
+   }
 }
 
 void TrackPanel::UpdateVRulers()

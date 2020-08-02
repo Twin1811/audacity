@@ -83,6 +83,16 @@ bool WaveformSettings::Validate(bool /* quiet */)
    return true;
 }
 
+void WaveformSettings::LoadDBRange()
+{
+   dBRange = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
+
+   // Enforce legal values
+   Validate(true);
+
+   Update();
+}
+
 void WaveformSettings::LoadPrefs()
 {
    scaleType = ScaleType(gPrefs->Read(wxT("/Waveform/ScaleType"), 0L));

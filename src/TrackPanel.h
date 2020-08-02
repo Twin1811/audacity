@@ -127,6 +127,8 @@ class AUDACITY_DLL_API TrackPanel final
    void UpdateVRuler(Track *t);
    void UpdateTrackVRuler(Track *t);
    void UpdateVRulerSize();
+   
+   void UpdateWaveformSettings();
 
  protected:
    bool IsAudioActive();
