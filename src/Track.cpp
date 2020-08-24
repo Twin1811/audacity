@@ -9,7 +9,7 @@
 *******************************************************************//**
 
 \class Track
-\brief Fundamental data object of Audacity, placed in the TrackPanel.
+\brief Fundamental data object of Audacity, displayed in the TrackPanel.
 Classes derived form it include the WaveTrack, NoteTrack, LabelTrack
 and TimeTrack.
 
@@ -800,8 +800,9 @@ TrackNodePointer TrackList::Remove(Track *t)
 
 void TrackList::Clear(bool sendEvent)
 {
-   // Null out the back-pointers in tracks, in case there are outstanding
-   // shared_ptrs to those tracks.
+   // Null out the back-pointers to this in tracks, in case there
+   // are outstanding shared_ptrs to those tracks, making them outlive
+   // the temporary ListOfTracks below.
    for ( auto pTrack: *this )
       pTrack->SetOwner( {}, {} );
    for ( auto pTrack: mPendingUpdates )
@@ -1073,8 +1074,8 @@ void TrackList::UpdatePendingTracks()
    }
 }
 
+/*! @excsafety{No-fail} */
 void TrackList::ClearPendingTracks( ListOfTracks *pAdded )
-// NOFAIL-GUARANTEE
 {
    for (const auto &pTrack: mPendingUpdates)
       pTrack->SetOwner( {}, {} );
@@ -1086,27 +1087,26 @@ void TrackList::ClearPendingTracks( ListOfTracks *pAdded )
 
    // To find the first node that remains after the first deleted one
    TrackNodePointer node;
-   bool findingNode = false;
    bool foundNode = false;
 
    for (auto it = ListOfTracks::begin(), stop = ListOfTracks::end();
         it != stop;) {
       if (it->get()->GetId() == TrackId{}) {
-         if (pAdded)
-            pAdded->push_back( *it );
-         (*it)->SetOwner( {}, {} );
-         it = erase( it );
+         do {
+            if (pAdded)
+               pAdded->push_back( *it );
+            (*it)->SetOwner( {}, {} );
+            it = erase( it );
+         }
+         while (it != stop && it->get()->GetId() == TrackId{});
 
-         if (!findingNode)
-            findingNode = true;
-         if (!foundNode && it != stop)
+         if (!foundNode && it != stop) {
             node = (*it)->GetNode();
-      }
-      else {
-         if ( findingNode )
             foundNode = true;
-         ++it;
+         }
       }
+      else
+         ++it;
    }
 
    if (!empty()) {
@@ -1115,6 +1115,7 @@ void TrackList::ClearPendingTracks( ListOfTracks *pAdded )
    }
 }
 
+/*! @excsafety{Strong} */
 bool TrackList::ApplyPendingTracks()
 {
    bool result = false;
@@ -1128,8 +1129,8 @@ bool TrackList::ApplyPendingTracks()
       updates.swap( mPendingUpdates );
    }
 
-   // Remaining steps must be NOFAIL-GUARANTEE so that this function
-   // gives STRONG-GUARANTEE
+   // Remaining steps must be No-fail-guarantee so that this function
+   // gives Strong-guarantee
 
    std::vector< std::shared_ptr<Track> > reinstated;
 
@@ -1277,39 +1278,4 @@ bool TrackList::HasPendingTracks() const
    }))
       return true;
    return false;
-}
-
-#include "SampleBlock.h"
-#include "ViewInfo.h"
-static auto TrackFactoryFactory = []( AudacityProject &project ) {
-   auto &viewInfo = ViewInfo::Get( project );
-   return std::make_shared< TrackFactory >(
-      ProjectSettings::Get( project ),
-      SampleBlockFactory::New( project ), &viewInfo );
-};
-
-static const AudacityProject::AttachedObjects::RegisteredFactory key2{
-   TrackFactoryFactory
-};
-
-TrackFactory &TrackFactory::Get( AudacityProject &project )
-{
-   return project.AttachedObjects::Get< TrackFactory >( key2 );
-}
-
-const TrackFactory &TrackFactory::Get( const AudacityProject &project )
-{
-   return Get( const_cast< AudacityProject & >( project ) );
-}
-
-TrackFactory &TrackFactory::Reset( AudacityProject &project )
-{
-   auto result = TrackFactoryFactory( project );
-   project.AttachedObjects::Assign( key2, result );
-   return *result;
-}
-
-void TrackFactory::Destroy( AudacityProject &project )
-{
-   project.AttachedObjects::Assign( key2, nullptr );
 }

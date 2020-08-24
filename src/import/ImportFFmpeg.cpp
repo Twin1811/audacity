@@ -112,6 +112,7 @@ static const auto exts = {
    wxT("nsv"),
    wxT("nuv"),
    wxT("ogg"),
+   wxT("opus"),
    wxT("psxstr"),
    wxT("pva"),
    wxT("redir"),
@@ -199,7 +200,7 @@ public:
 
    ///! Imports audio
    ///\return import status (see Import.cpp)
-   ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+   ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
       Tags *tags) override;
 
    ///! Reads next audio frame
@@ -466,7 +467,7 @@ auto FFmpegImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
+ProgressResult FFmpegImportFileHandle::Import(WaveTrackFactory *trackFactory,
               TrackHolders &outTracks,
               Tags *tags)
 {

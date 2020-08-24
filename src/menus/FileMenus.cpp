@@ -16,18 +16,22 @@
 #include "../ProjectManager.h"
 #include "../ProjectWindow.h"
 #include "../SelectUtilities.h"
+#include "../ShuttleGui.h"
 #include "../TrackPanel.h"
 #include "../UndoManager.h"
 #include "../ViewInfo.h"
 #include "../WaveTrack.h"
 #include "../commands/CommandContext.h"
 #include "../commands/CommandManager.h"
+#include "../export/ExportMP3.h"
 #include "../export/ExportMultiple.h"
 #include "../import/Import.h"
 #include "../import/ImportMIDI.h"
 #include "../import/ImportRaw.h"
 #include "../widgets/AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
+#include "../widgets/HelpSystem.h"
+#include "../widgets/wxPanelWrapper.h"
 
 #ifdef USE_MIDI
 #include "../import/ImportMIDI.h"
@@ -37,7 +41,8 @@
 
 // private helper classes and functions
 namespace {
-void DoExport( AudacityProject &project, const FileExtension & Format )
+
+void DoExport(AudacityProject &project, const FileExtension &format)
 {
    auto &tracks = TrackList::Get( project );
    auto &projectFileIO = ProjectFileIO::Get( project );
@@ -46,66 +51,110 @@ void DoExport( AudacityProject &project, const FileExtension & Format )
 
    double t0 = 0.0;
    double t1 = tracks.GetEndTime();
+   wxString projectName = project.GetProjectName();
 
    // Prompt for file name and/or extension?
-   bool bPromptingRequired =
-      (project.mBatchMode == 0) || projectFileIO.GetFileName().empty() ||
-      Format.empty();
-   wxString filename;
+   bool bPromptingRequired = !project.mBatchMode ||
+                             projectName.empty() ||
+                             format.empty();
 
-   if (!bPromptingRequired) {
-
-      // We're in batch mode, and we have an mFileName and Format.
-      wxString extension = Format;
-      extension.MakeLower();
-
-      filename =
-         MacroCommands::BuildCleanFileName(projectFileIO.GetFileName(), extension);
-
-      // Bug 1854, No warning of file overwrite
-      // (when export is called from Macros).
-      int counter = 0;
-      bPromptingRequired = wxFileExists(filename);
-
-      // We'll try alternative names to avoid overwriting.
-      while ( bPromptingRequired && counter < 100 ) {
-         counter++;
-         wxString number;
-         number.Printf("%03i", counter);
-         // So now the name has a number in it too.
-         filename = MacroCommands::BuildCleanFileName(
-            projectFileIO.GetFileName() + number, extension);
-         bPromptingRequired = wxFileExists(filename);
-      }
-      // If we've run out of alternative names, we will fall back to prompting
-      // - even if in a macro.
-   }
-
-
-   if (bPromptingRequired)
-   {
+   bool success = false;
+   if (bPromptingRequired) {
       // Do export with prompting.
-      e.SetDefaultFormat(Format);
-      e.Process(false, t0, t1);
+      e.SetDefaultFormat(format);
+      success = e.Process(false, t0, t1);
    }
-   else
-   {
-      FileHistory::Global().Append(filename);
+   else {
+      // If we've gotten to this point, we are in batch mode, have a file format,
+      // and the project has either been saved or a file has been imported. So, we
+      // want to use the project's path if it has been saved, otherwise use the
+      // initial import path.
+      FilePath pathName = !projectFileIO.IsTemporary() ?
+                           wxPathOnly(projectFileIO.GetFileName()) :
+                           project.GetInitialImportPath();
+      wxFileName fileName(pathName, projectName, format.Lower());
+
+      // Append the "macro-output" directory to the path
+      const wxString macroDir( "macro-output" );
+      if (fileName.GetDirs().back() != macroDir) {
+         fileName.AppendDir(macroDir);
+      }
+
+      wxString justName = fileName.GetName();
+      wxString extension = fileName.GetExt();
+      FilePath fullPath = fileName.GetFullPath();
+
+      if (wxFileName::FileExists(fileName.GetPath())) {
+         AudacityMessageBox(
+            XO("Cannot create directory '%s'. \n"
+               "File already exists that is not a directory"),
+            Verbatim(fullPath));
+         return;
+      }
+      fileName.Mkdir(0777, wxPATH_MKDIR_FULL); // make sure it exists
+
+      int nChannels = (tracks.Any() - &Track::IsLeader ).empty() ? 1 : 2;
+
       // We're in batch mode, the file does not exist already.
       // We really can proceed without prompting.
-      int nChannels = MacroCommands::IsMono( &project ) ? 1 : 2;
-      e.Process(
+      success = e.Process(
          nChannels,  // numChannels,
-         Format,     // type, 
-         filename,   // filename,
+         format,     // type, 
+         fullPath,   // full path,
          false,      // selectedOnly, 
          t0,         // t0
          t1          // t1
       );
    }
 
+   if (success && !project.mBatchMode) {
+      FileHistory::Global().Append(e.GetAutoExportFileName().GetFullPath());
+   }
 }
+
 }
+
+// Compact dialog
+class CompactDialog : public wxDialogWrapper
+{
+public:
+   CompactDialog(TranslatableString text)
+   :  wxDialogWrapper(nullptr, wxID_ANY, XO("Compact Project"))
+   {
+      ShuttleGui S(this, eIsCreating);
+
+      S.StartVerticalLay(true);
+      {
+         S.AddFixedText(text, false, 500);
+
+         S.AddStandardButtons(eYesButton | eNoButton | eHelpButton);
+      }
+      S.EndVerticalLay();
+
+      FindWindowById(wxID_YES, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnYes, this);
+      FindWindowById(wxID_NO, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnNo, this);
+      FindWindowById(wxID_HELP, this)->Bind(wxEVT_BUTTON, &CompactDialog::OnGetURL, this);
+
+      Layout();
+      Fit();
+      Center();
+   }
+
+   void OnYes(wxCommandEvent &WXUNUSED(evt))
+   {
+      EndModal(wxYES);
+   }
+
+   void OnNo(wxCommandEvent &WXUNUSED(evt))
+   {
+      EndModal(wxNO);
+   }
+
+   void OnGetURL(wxCommandEvent &WXUNUSED(evt))
+   {
+      HelpSystem::ShowHelp(this, wxT("File_Menu:_Compact_Project"), true);
+   }
+};
 
 // Menu handler functions
 
@@ -149,6 +198,7 @@ void OnCompact(const CommandContext &context)
    auto &undoManager = UndoManager::Get(project);
    auto &clipboard = Clipboard::Get();
    auto &projectFileIO = ProjectFileIO::Get(project);
+   bool isBatch = project.mBatchMode > 0;
 
    // Purpose of this is to remove the -wal file.
    projectFileIO.ReopenProject();
@@ -165,21 +215,18 @@ void OnCompact(const CommandContext &context)
 
    auto before = wxFileName::GetSize(projectFileIO.GetFileName());
 
-   int id = AudacityMessageBox(
-      XO("Compacting this project will free up disk space by removing unused bytes within the file.\n\n"
-         "There is %s of free disk space and this project is currently using %s.\n"
-         "\n"
-         "If you proceed, the current Undo History and clipboard contents will be discarded "
-         "and you will recover approximately %s of disk space.\n"
-         "\n"
-         "Do you want to continue?")
-      .Format(Internat::FormatSize(projectFileIO.GetFreeDiskSpace()),
-              Internat::FormatSize(before.GetValue()),
-              Internat::FormatSize(total - used)),
-      XO("Compact Project"),
-      wxYES_NO);
-
-   if (id == wxYES)
+   CompactDialog dlg(
+         XO("Compacting this project will free up disk space by removing unused bytes within the file.\n\n"
+            "There is %s of free disk space and this project is currently using %s.\n"
+            "\n"
+            "If you proceed, the current Undo/Redo History and clipboard contents will be discarded "
+            "and you will recover approximately %s of disk space.\n"
+            "\n"
+            "Do you want to continue?")
+         .Format(Internat::FormatSize(projectFileIO.GetFreeDiskSpace()),
+                  Internat::FormatSize(before.GetValue()),
+                  Internat::FormatSize(total - used)));
+   if (isBatch || dlg.ShowModal() == wxYES)
    {
       // Want to do this before removing the states so that it becomes the
       // current state.
@@ -201,10 +248,13 @@ void OnCompact(const CommandContext &context)
 
       auto after = wxFileName::GetSize(projectFileIO.GetFileName());
 
-      AudacityMessageBox(
-         XO("Compacting actually freed %s of disk space.")
-         .Format(Internat::FormatSize((before - after).GetValue())),
-         XO("Compact Project"));
+      if (!isBatch)
+      {
+         AudacityMessageBox(
+            XO("Compacting actually freed %s of disk space.")
+            .Format(Internat::FormatSize((before - after).GetValue())),
+            XO("Compact Project"));
+      }
    }
 
    currentTracks.reset();
@@ -461,7 +511,7 @@ void OnImport(const CommandContext &context)
 void OnImportLabels(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &trackFactory = TrackFactory::Get( project );
+   auto &trackFactory = WaveTrackFactory::Get( project );
    auto &tracks = TrackList::Get( project );
    auto &window = ProjectWindow::Get( project );
 
@@ -485,7 +535,7 @@ void OnImportLabels(const CommandContext &context)
          return;
       }
 
-      auto newTrack = trackFactory.NewLabelTrack();
+      auto newTrack = std::make_shared<LabelTrack>();
       wxString sTrackName;
       wxFileName::SplitPath(fileName, NULL, NULL, &sTrackName, NULL);
       newTrack->SetName(sTrackName);
@@ -535,7 +585,7 @@ void OnImportMIDI(const CommandContext &context)
 void OnImportRaw(const CommandContext &context)
 {
    auto &project = context.project;
-   auto &trackFactory = TrackFactory::Get( project );
+   auto &trackFactory = WaveTrackFactory::Get( project );
    auto &window = ProjectWindow::Get( project );
 
    wxString fileName =
@@ -584,6 +634,11 @@ void OnExit(const CommandContext &WXUNUSED(context) )
    // Simulate the application Exit menu item
    wxCommandEvent evt{ wxEVT_MENU, wxID_EXIT };
    wxTheApp->AddPendingEvent( evt );
+}
+
+void OnExportFLAC(const CommandContext &context)
+{
+   DoExport(context.project, "FLAC");
 }
 
 }; // struct Handler
@@ -755,6 +810,36 @@ AttachedItem sAttachment1{
    wxT(""),
    Shared( FileMenu() )
 };
+
+BaseItemSharedPtr HiddenFileMenu()
+{
+   static BaseItemSharedPtr menu
+   {
+      (
+         FinderScope{ findCommandHandler },
+         ConditionalItems( wxT("HiddenFileItems"),
+            []()
+            {
+               // Ensures that these items never appear in a menu, but
+               // are still available to scripting
+               return false;
+            },
+            Menu( wxT("HiddenFileMenu"), XXO("Hidden File Menu"),
+               Command( wxT("ExportFLAC"), XXO("Export as FLAC"),
+                  FN(OnExportFLAC),
+                  AudioIONotBusyFlag() )
+            )
+         )
+      )
+   };
+   return menu;
+}
+
+AttachedItem sAttachment2{
+   wxT(""),
+   Shared( HiddenFileMenu() )
+};
+
 }
 
 #undef FN

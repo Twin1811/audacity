@@ -407,7 +407,6 @@ void OnResetConfig(const CommandContext &context)
    gPrefs->Write(wxT("/Version/Micro"), AUDACITY_REVISION);
 
    gPrefs->Flush();
-
 }
 
 void OnManageGenerators(const CommandContext &context)

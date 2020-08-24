@@ -94,12 +94,12 @@ auto ProjectAudioManager::StatusWidthFunction(
    return {};
 }
 
+/*! @excsafety{Strong} -- For state of mCutPreviewTracks */
 int ProjectAudioManager::PlayPlayRegion(const SelectedRegion &selectedRegion,
                                    const AudioIOStartStreamOptions &options,
                                    PlayMode mode,
                                    bool backwards, /* = false */
                                    bool playWhiteSpace /* = false */)
-// STRONG-GUARANTEE (for state of mCutPreviewTracks)
 {
    auto &projectAudioManager = *this;
    bool canStop = projectAudioManager.CanStopAudioStream();
@@ -458,8 +458,8 @@ WaveTrackArray ProjectAudioManager::ChooseExistingRecordingTracks(
    return {};
 }
 
+/*! @excsafety{Strong} -- For state of current project's tracks */
 void ProjectAudioManager::OnRecord(bool altAppearance)
-// STRONG-GUARANTEE (for state of current project's tracks)
 {
    bool bPreferNewTrack;
    gPrefs->Read("/GUI/PreferNewTrackRecord", &bPreferNewTrack, false);
@@ -675,7 +675,7 @@ bool ProjectAudioManager::DoRecord(AudacityProject &project,
 
          Track *first {};
          for (int c = 0; c < recordingChannels; c++) {
-            auto newTrack = TrackFactory::Get( *p ).NewWaveTrack();
+            auto newTrack = WaveTrackFactory::Get( *p ).NewWaveTrack();
             if (!first)
                first = newTrack.get();
 
@@ -803,10 +803,10 @@ void ProjectAudioManager::OnPause()
    }
 }
 
+/*! @excsafety{Strong} -- For state of mCutPreviewTracks*/
 void ProjectAudioManager::SetupCutPreviewTracks(double WXUNUSED(playStart), double cutStart,
                                            double cutEnd, double  WXUNUSED(playEnd))
 
-// STRONG-GUARANTEE (for state of mCutPreviewTracks)
 {
    ClearCutPreviewTracks();
    AudacityProject *p = &mProject;
@@ -822,7 +822,7 @@ void ProjectAudioManager::SetupCutPreviewTracks(double WXUNUSED(playStart), doub
             newTrack->Clear(cutStart, cutEnd);
             cutPreviewTracks->Add( newTrack );
          }
-         // use NOTHROW-GUARANTEE:
+         // use No-throw-guarantee:
          mCutPreviewTracks = cutPreviewTracks;
       }
    }
@@ -879,7 +879,7 @@ void ProjectAudioManager::OnAudioIOStopRecording()
       }
       else {
          // Add to history
-         // We want this to have NOFAIL-GUARANTEE if we get here from exception
+         // We want this to have No-fail-guarantee if we get here from exception
          // handling of recording, and that means we rely on the last autosave
          // successully committed to the database, not risking a failure
          history.PushState(XO("Recorded Audio"), XO("Record"),
@@ -892,7 +892,7 @@ void ProjectAudioManager::OnAudioIOStopRecording()
          auto &intervals = gAudioIO->LostCaptureIntervals();
          if (intervals.size()) {
             // Make a track with labels for recording errors
-            auto uTrack = TrackFactory::Get( project ).NewLabelTrack();
+            auto uTrack = std::make_shared<LabelTrack>();
             auto pTrack = uTrack.get();
             tracks.Add( uTrack );
             /* i18n-hint:  A name given to a track, appearing as its menu button.

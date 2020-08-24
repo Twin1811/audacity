@@ -12,10 +12,11 @@ Paul Licameli
 #define __AUDACITY_WAVEFORM_SETTINGS__
 
 #include "../Internat.h" // for TranslatableStrings
+#include "../Prefs.h"
 
 class EnumValueSymbols;
 
-class WaveformSettings
+class WaveformSettings : public PrefsListener
 {
 public:
 
@@ -47,6 +48,8 @@ public:
    void SavePrefs();
    void Update();
    void LoadDBRange();
+
+   void UpdatePrefs() override;
 
    void ConvertToEnumeratedDBRange();
    void ConvertToActualDBRange();

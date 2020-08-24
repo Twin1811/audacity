@@ -57,6 +57,7 @@ enum {
 };
 
 BEGIN_EVENT_TABLE(HistoryDialog, wxDialogWrapper)
+   EVT_SHOW(HistoryDialog::OnShow)
    EVT_SIZE(HistoryDialog::OnSize)
    EVT_CLOSE(HistoryDialog::OnCloseWindow)
    EVT_LIST_ITEM_SELECTED(wxID_ANY, HistoryDialog::OnItemSelected)
@@ -93,9 +94,10 @@ HistoryDialog::HistoryDialog(AudacityProject *parent, UndoManager *manager):
       {
          mList = S
             .MinSize()
+            .ConnectRoot(wxEVT_KEY_DOWN, &HistoryDialog::OnListKeyDown)
             .AddListControlReportMode(
                { { XO("Action"), wxLIST_FORMAT_LEFT, 260 },
-                 { XO("Reclaimable Space"), wxLIST_FORMAT_LEFT, 125 } },
+                 { XO("Used Space"), wxLIST_FORMAT_LEFT, 125 } },
                wxLC_SINGLE_SEL
             );
 
@@ -105,14 +107,13 @@ HistoryDialog::HistoryDialog(AudacityProject *parent, UndoManager *manager):
 
          S.StartMultiColumn(3, wxCENTRE);
          {
-            mTotal = S.Id(ID_TOTAL)
-               .ConnectRoot(wxEVT_KEY_DOWN, &HistoryDialog::OnChar)
-               .AddTextBox(XXO("&Total space used"), wxT("0"), 10);
+            S.AddPrompt(XXO("&Total space used"));
+            mTotal = S.Id(ID_TOTAL).Style(wxTE_READONLY).AddTextBox({}, wxT(""), 10);
             S.AddVariableText( {} )->Hide();
 
-            mAvail = S.Id(ID_AVAIL)
-               .ConnectRoot(wxEVT_KEY_DOWN, &HistoryDialog::OnChar)
-               .AddTextBox(XXO("&Undo levels available"), wxT("0"), 10);
+#if defined(ALLOW_DISCARD)
+            S.AddPrompt(XXO("&Undo levels available"));
+            mAvail = S.Id(ID_AVAIL).Style(wxTE_READONLY).AddTextBox({}, wxT(""), 10);
             S.AddVariableText( {} )->Hide();
 
             S.AddPrompt(XXO("&Levels to discard"));
@@ -128,18 +129,23 @@ HistoryDialog::HistoryDialog(AudacityProject *parent, UndoManager *manager):
             S.AddWindow(mLevels);
             /* i18n-hint: (verb)*/
             mDiscard = S.Id(ID_DISCARD).AddButton(XXO("&Discard"));
+#endif
+            S.AddPrompt(XXO("Clip&board space used"));
+            mClipboard = S.Style(wxTE_READONLY).AddTextBox({}, wxT(""), 10);
 
-            mClipboard = S
-               .ConnectRoot(wxEVT_KEY_DOWN, &HistoryDialog::OnChar)
-               .AddTextBox(XXO("Clip&board space used"), wxT("0"), 10);
+#if defined(ALLOW_DISCARD)
             S.Id(ID_DISCARD_CLIPBOARD).AddButton(XXO("D&iscard"));
+#endif
          }
          S.EndMultiColumn();
       }
       S.EndStatic();
-
+#if defined(ALLOW_DISCARD)
       mCompact = safenew wxButton(this, ID_COMPACT, _("&Compact"));
       S.AddStandardButtons(eOkButton | eHelpButton, mCompact);
+#else
+      S.AddStandardButtons(eOkButton | eHelpButton);
+#endif
    }
    S.EndVerticalLay();
    // ----------------------- End of main section --------------
@@ -165,11 +171,6 @@ HistoryDialog::HistoryDialog(AudacityProject *parent, UndoManager *manager):
    parent->Bind(EVT_UNDO_RESET, &HistoryDialog::UpdateDisplay, this);
 }
 
-void HistoryDialog::OnChar( wxEvent& )
-{
-   // ignore it
-}
-
 void HistoryDialog::OnAudioIO(wxCommandEvent& evt)
 {
    evt.Skip();
@@ -179,8 +180,10 @@ void HistoryDialog::OnAudioIO(wxCommandEvent& evt)
    else
       mAudioIOBusy = false;
 
+#if defined(ALLOW_DISCARD)
    mDiscard->Enable(!mAudioIOBusy);
    mCompact->Enable(!mAudioIOBusy);
+#endif
 }
 
 void HistoryDialog::UpdateDisplay(wxEvent& e)
@@ -219,7 +222,9 @@ void HistoryDialog::DoUpdate()
 
    auto clipboardUsage = mManager->GetClipboardSpaceUsage();
    mClipboard->SetValue(Internat::FormatSize(clipboardUsage).Translation());
+#if defined(ALLOW_DISCARD)
    FindWindowById(ID_DISCARD_CLIPBOARD)->Enable(clipboardUsage > 0);
+#endif
 
    mList->EnsureVisible(mSelected);
 
@@ -232,6 +237,7 @@ void HistoryDialog::DoUpdate()
 
 void HistoryDialog::UpdateLevels()
 {
+#if defined(ALLOW_DISCARD)
    wxWindow *focus;
    int value = mLevels->GetValue();
 
@@ -255,6 +261,7 @@ void HistoryDialog::UpdateLevels()
 
    mLevels->Enable(mSelected > 0);
    mDiscard->Enable(!mAudioIOBusy && mSelected > 0);
+#endif
 }
 
 void HistoryDialog::OnDiscard(wxCommandEvent & WXUNUSED(event))
@@ -298,7 +305,7 @@ void HistoryDialog::OnCompact(wxCommandEvent & WXUNUSED(event))
 
 void HistoryDialog::OnGetURL(wxCommandEvent & WXUNUSED(event))
 {
-   HelpSystem::ShowHelp(this, wxT("View_Menu#history"));
+   HelpSystem::ShowHelp(this, wxT("Undo,_Redo_and_History"));
 }
 
 void HistoryDialog::OnItemSelected(wxListEvent &event)
@@ -333,9 +340,33 @@ void HistoryDialog::OnItemSelected(wxListEvent &event)
    UpdateLevels();
 }
 
+void HistoryDialog::OnListKeyDown(wxKeyEvent & event)
+{
+   switch (event.GetKeyCode())
+   {
+      case WXK_RETURN:
+         // Don't know why wxListCtrls prevent default dialog action,
+         // but they do, so handle it.
+         EmulateButtonClickIfPresent(GetAffirmativeId());
+      break;
+
+      default:
+         event.Skip();
+      break;
+   }
+}
+
 void HistoryDialog::OnCloseWindow(wxCloseEvent & WXUNUSED(event))
 {
-  this->Show(false);
+   this->Show(false);
+}
+
+void HistoryDialog::OnShow(wxShowEvent & event)
+{
+   if (event.IsShown())
+   {
+      mList->SetFocus();
+   }
 }
 
 void HistoryDialog::OnSize(wxSizeEvent & WXUNUSED(event))
